@@ -1,20 +1,35 @@
 import json
-from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Group, Combine, OneOrMore, delimitedList, \
-    ParseException, Regex, Optional
+import logging
+import sys
 
-NGINX_ERROR_LOG = r'/LocalConfig/error.log'
+from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Group, Combine, OneOrMore, delimitedList, \
+    ParseException, Regex, Optional, Literal
+
+NGINX_ERROR_LOG = r'LocalConfig/error.log'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
+
+logger = logging.getLogger('logger')
+logger.setLevel(logging.DEBUG)
+
+sh = logging.StreamHandler(sys.stdout)
+sh.setLevel(logging.DEBUG)
+sh.setFormatter(FORMATTER)
+logger.addHandler(sh)
 
 
 class LogReader(object):
-    def __init__(self):
+    def __init__(self, log_location: str):
+        if not isinstance(log_location, str):
+                raise TypeError('log_location should be a string')
+        self.log_location = log_location
         self.known_ips = self._get_known_ips()
-
 
     def _get_known_ips(self):
         with open(KNOWN_IPS_LIST, 'r') as file:
-            data = json.loads(file)
+            data = json.load(file)
             return data
 
     def write_known_ips(self):
@@ -25,48 +40,108 @@ class LogReader(object):
 
 
 
-# Define basic components
-integer = Word(nums)
-ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
-datetime_part = Word(nums, exact=4) + '/' + Word(nums, exact=2) + '/' + Word(nums, exact=2)
-time_part = Word(nums, exact=2) + ':' + Word(nums, exact=2) + ':' + Word(nums, exact=2)
 
-# Define the new pattern for process ID and request ID
-process_ids = Combine(integer + '#' + integer)
-request_id = Suppress(':') + Suppress('*') + integer
+class NginxErrorLogReader(LogReader):
+    def __init__(self, log_location):
+        super().__init__(log_location)
+        # Define basic components of a log entry
+        self.integer = Word(nums)
+        #self.ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
+        self.ip_address = Word(nums + '.')("client_ip")
+        self.datetime_part = Combine(Word(nums, exact=4) + '/' +
+                                     Word(nums, exact=2) + '/' +
+                                     Word(nums, exact=2))
+        self.time_part = Combine(Word(nums, exact=2) + ':' +
+                                 Word(nums, exact=2) + ':' +
+                                 Word(nums, exact=2))
+        self.process_ids = Combine(self.integer + '#' + self.integer)
+        self.request_id = Suppress(':') + Suppress('*') + self.integer
 
-# Define other parts of the log line
-datetime_expr = datetime_part + time_part
-error_level = Literal("[error]")
-client_expr = Suppress("[client") + ip_address + Suppress("]")
-modsecurity_msg = Literal("ModSecurity: Access denied with code") + integer
-
-# Define the full line structure
-log_line = (
-    datetime_expr("datetime") +
-    error_level("level") +
-    process_ids("process_ids") +
-    request_id("request_id") +
-    client_expr("client_ip") +
-    modsecurity_msg +
-    Optional(Regex(".*"))  # Capture the remaining part of the message if needed
-)
-
-# Function to parse each line of the log file
-def parse_log_file(file_path):
-    with open(file_path, 'r') as file:
-        for line in file:
-            try:
-                parsed = log_line.parseString(line)
-                print("Parsed line:", parsed)
-            except Exception as e:
-                print("Failed to parse line:", line)
-                print("Error:", e)
+        # Define other parts of the log entry
+        self.datetime_expr = (self.datetime_part("date") + self.time_part("time"))
+        #self.datetime_expr = (self.datetime_part + self.time_part)
+        # self.datetime_expr = (self.datetime_part + self.time_part).setParseAction(
+        #     lambda t: t.__setitem__("datetime", f"{t['date']} {t['time']}")
+        # )
+        # self.datetime_expr.setParseAction(lambda tokens: {
+        #     "datetime": f"{tokens[0]} {tokens[1]}",
+        #     "date": tokens[0],
+        #     "time": tokens[1]
+        # })
+        #self.datetime_expr.setParseAction(lambda tokens: tokens.__setitem__("datetime", f"{tokens.date} {tokens.time}"))
 
 
-# Usage
-readit = LogReader()
-readit.write_known_ips()
-log_file_path = NGINX_ERROR_LOG
-parse_log_file(log_file_path)
+        self.error_level = Literal("[error]")
+        # self.client_expr = Suppress("[client") + self.ip_address + Suppress("]")
+        self.client_expr = (Optional(Suppress("[client")) +
+                            self.ip_address +
+                            Optional(Suppress("]")))
+        self.client_expr.setParseAction(lambda t: t[0])
+        self.modsecurity_msg = Literal("ModSecurity: Access denied with code") + self.integer
+
+        # Define the full line structure
+        self.log_line = (
+            self.datetime_expr("datetime") +
+            #self.time_part("time") +
+            #self.datetime_part("date") +
+            self.error_level("level") +
+            self.process_ids("process_ids") +
+            self.request_id("request_id") +
+            self.client_expr("client_ip") +
+            self.modsecurity_msg +
+            Optional(Regex(".*"))  # Capture the remaining part of the message if needed
+        )
+
+    # Function to parse each line of the log file
+    def parse_log_file(self):
+        parsed_results = []
+        with open(self.log_location, 'r') as file:
+            for line in file:
+                try:
+                    parsed = self.log_line.parseString(line)
+                    parsed['datetime'] = f'{parsed['date']} {parsed['time']}'
+                    logger.debug(f'Parsed line: {parsed}')
+                    logger.debug(f'Client IP: {parsed["client_ip"]}')
+                    logger.debug(f'Datetime: {parsed["datetime"]}')
+                    parsed_results.append(parsed)
+
+                except Exception as e:
+                    logger.error(f'Failed to parse line: {line}')
+                    logger.error(f'Error: {e}')
+
+        return parsed_results
+
+    def print_log_to_console(self, parsed_results):
+        for result in parsed_results:
+            print(f'{result['date']} {result['time']} {result['client_ip']}')
+
+
+
+
+
+class LogReaderFactory:
+    def create_log_reader(self, log_reader_type):
+        if log_reader_type == 'NGINX Error Log':
+            pass
+        elif log_reader_type == 'NGINX Access Log':
+            pass
+        elif log_reader_type == 'ModSecurity Audit Log':
+            pass
+        else:
+            raise ValueError(f'Unknown LogReader Type: {log_reader_type}')
+
+
+
+def main():
+    readit = NginxErrorLogReader(NGINX_ERROR_LOG)
+    log_results = readit.parse_log_file()
+    readit.print_log_to_console(log_results)
+    readit.write_known_ips()
+    # print(log_results[0]['client_ip'])
+    # print(log_results[0]['datetime'])
+    # print(log_results[0]['date'])
+    # print(log_results[0]['time'])
+
+if __name__ == '__main__':
+    main()
 
