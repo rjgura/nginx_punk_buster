@@ -113,7 +113,10 @@ class NginxErrorLogReader(LogReader):
 
     def print_log_to_console(self, parsed_results):
         for result in parsed_results:
-            print(f'{result['date']} {result['time']} {result['client_ip']}')
+            if result['client_ip'] in self.known_ips.values():
+                print(f'{result['date']} {result['time']} {result['client_ip']} FRIENDLY')
+            else:
+                print(f'{result['date']} {result['time']} {result['client_ip']}')
 
 
 
