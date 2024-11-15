@@ -46,8 +46,7 @@ class NginxErrorLogReader(LogReader):
         super().__init__(log_location)
         # Define basic components of a log entry
         self.integer = Word(nums)
-        #self.ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
-        self.ip_address = Word(nums + '.')("client_ip")
+        self.ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
         self.datetime_part = Combine(Word(nums, exact=4) + '/' +
                                      Word(nums, exact=2) + '/' +
                                      Word(nums, exact=2))
@@ -59,18 +58,6 @@ class NginxErrorLogReader(LogReader):
 
         # Define other parts of the log entry
         self.datetime_expr = (self.datetime_part("date") + self.time_part("time"))
-        #self.datetime_expr = (self.datetime_part + self.time_part)
-        # self.datetime_expr = (self.datetime_part + self.time_part).setParseAction(
-        #     lambda t: t.__setitem__("datetime", f"{t['date']} {t['time']}")
-        # )
-        # self.datetime_expr.setParseAction(lambda tokens: {
-        #     "datetime": f"{tokens[0]} {tokens[1]}",
-        #     "date": tokens[0],
-        #     "time": tokens[1]
-        # })
-        #self.datetime_expr.setParseAction(lambda tokens: tokens.__setitem__("datetime", f"{tokens.date} {tokens.time}"))
-
-
         self.error_level = Literal("[error]")
         # self.client_expr = Suppress("[client") + self.ip_address + Suppress("]")
         self.client_expr = (Optional(Suppress("[client")) +
@@ -82,8 +69,6 @@ class NginxErrorLogReader(LogReader):
         # Define the full line structure
         self.log_line = (
             self.datetime_expr("datetime") +
-            #self.time_part("time") +
-            #self.datetime_part("date") +
             self.error_level("level") +
             self.process_ids("process_ids") +
             self.request_id("request_id") +
@@ -103,7 +88,8 @@ class NginxErrorLogReader(LogReader):
                     logger.debug(f'Parsed line: {parsed}')
                     logger.debug(f'Client IP: {parsed["client_ip"]}')
                     logger.debug(f'Datetime: {parsed["datetime"]}')
-                    parsed_results.append(parsed)
+                    if parsed['client_ip'] not in self.known_ips.values():
+                        parsed_results.append(parsed)
 
                 except Exception as e:
                     logger.error(f'Failed to parse line: {line}')
@@ -117,6 +103,15 @@ class NginxErrorLogReader(LogReader):
                 print(f'{result['date']} {result['time']} {result['client_ip']} FRIENDLY')
             else:
                 print(f'{result['date']} {result['time']} {result['client_ip']}')
+
+    def aggregate_logs(self):
+        self._remove_known_ips()
+
+    def _remove_known_ips(self):
+        pass
+
+    def _de_dupe_logs(self):
+        pass
 
 
 
