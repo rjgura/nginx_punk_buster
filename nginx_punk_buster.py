@@ -3,7 +3,7 @@ import logging
 import sys
 
 from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Group, Combine, OneOrMore, delimitedList, \
-    ParseException, Regex, Optional, Literal
+    ParseException, Regex, Optional, Literal, removeQuotes, SkipTo
 
 NGINX_ERROR_LOG = r'LocalConfig/error.log'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
@@ -66,6 +66,17 @@ class NginxErrorLogReader(LogReader):
         self.client_expr.setParseAction(lambda t: t[0])
         self.http_code = Literal("ModSecurity: Access denied with code") + self.integer
         self.http_code.setParseAction(lambda t: t[1])
+        self.field_value = Group(
+            Suppress('[') +
+            Word(alphanums)('field') +
+            quotedString.setParseAction(removeQuotes)('value') +
+            Suppress(']')
+        )
+        self.fields = Group(self.field_value[...])
+        # self.msg = (Optional(Suppress('[')) +
+        #             Literal('msg') +
+        #             quotedString.setParseAction(removeQuotes) +
+        #             Optional(Suppress(']')))
 
         # Define the full line structure
         self.log_line = (
@@ -75,6 +86,9 @@ class NginxErrorLogReader(LogReader):
             self.request_id("request_id") +
             self.client_expr("client_ip") +
             self.http_code("http_code") +
+            Optional(SkipTo('[')) +
+            self.fields('fields') +
+            # self.msg("msg") +
             Optional(Regex(".*"))  # Capture the remaining part of the message if needed
         )
 
@@ -141,6 +155,9 @@ def main():
     # print(log_results[0]['date'])
     # print(log_results[0]['time'])
     print(log_results[0]['http_code'])
+    # print(log_results[0]['msg'])
+    for field in log_results[0]['fields']:
+        print(field)
 
 if __name__ == '__main__':
     main()
