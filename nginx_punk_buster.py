@@ -64,7 +64,8 @@ class NginxErrorLogReader(LogReader):
                             self.ip_address +
                             Optional(Suppress("]")))
         self.client_expr.setParseAction(lambda t: t[0])
-        self.modsecurity_msg = Literal("ModSecurity: Access denied with code") + self.integer
+        self.http_code = Literal("ModSecurity: Access denied with code") + self.integer
+        self.http_code.setParseAction(lambda t: t[1])
 
         # Define the full line structure
         self.log_line = (
@@ -73,7 +74,7 @@ class NginxErrorLogReader(LogReader):
             self.process_ids("process_ids") +
             self.request_id("request_id") +
             self.client_expr("client_ip") +
-            self.modsecurity_msg +
+            self.http_code("http_code") +
             Optional(Regex(".*"))  # Capture the remaining part of the message if needed
         )
 
@@ -139,6 +140,7 @@ def main():
     # print(log_results[0]['datetime'])
     # print(log_results[0]['date'])
     # print(log_results[0]['time'])
+    print(log_results[0]['http_code'])
 
 if __name__ == '__main__':
     main()
