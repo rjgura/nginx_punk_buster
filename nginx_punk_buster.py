@@ -1,12 +1,14 @@
+import configparser
 import csv
 import json
 import logging
 import sys
 
-from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Group, Combine, OneOrMore, delimitedList, \
-    ParseException, Regex, Optional, Literal, removeQuotes, SkipTo, ParseResults
+from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
+    removeQuotes, SkipTo, ParseResults
 
-NGINX_ERROR_LOG = r'LocalConfig/error.log'
+CONFIG_PATH = r'LocalConfig/Settings.ini'
+NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
 
@@ -20,6 +22,17 @@ sh = logging.StreamHandler(sys.stdout)
 sh.setLevel(logging.DEBUG)
 sh.setFormatter(FORMATTER)
 logger.addHandler(sh)
+
+config = configparser.ConfigParser()
+config.read(CONFIG_PATH)
+
+logger.debug(f'Loading config file: {CONFIG_PATH}')
+try:
+    ABUSEIPDB_API_KEY = config['CREDENTIALS']['AbuseIPDB_API_Key']
+
+except KeyError:
+    logger.error('Error loading config file: check that file exists and settings inside are correct')
+    quit()
 
 
 class LogReader(object):
@@ -181,6 +194,18 @@ class NginxErrorLogReader(LogReader):
                 result['Count'] = ip_count
                 self.ban_list.append(result)
 
+    def write_ban_list_csv(self):
+        file_name = r'ban_list.csv'
+        csv_path = CSV_PATH + file_name
+        logger.debug(f'write_ban_list_csv writing: {csv_path}')
+        self._write_csv(self.ban_list, csv_path)
+
+    def write_parsed_results_csv(self):
+        file_name = r'parsed_results.csv'
+        csv_path = CSV_PATH + file_name
+        logger.debug(f'write_parsed_results_csv writing: {csv_path}')
+        self._write_csv(self.parsed_results, csv_path)
+
 
 
 
@@ -203,6 +228,8 @@ def main():
     readit.parse_log_file()
     readit.print_log_to_console()
     readit.write_known_ips()
+    readit.write_ban_list_csv()
+    readit.write_parsed_results_csv()
     # print(log_results[0]['client_ip'])
     # print(log_results[0]['datetime'])
     # print(log_results[0]['date'])
