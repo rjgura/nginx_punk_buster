@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import sys
@@ -7,6 +8,7 @@ from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Gro
 
 NGINX_ERROR_LOG = r'LocalConfig/error.log'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
+CSV_PATH = r'LocalConfig/'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -31,6 +33,20 @@ class LogReader(object):
         with open(KNOWN_IPS_LIST, 'r') as file:
             data = json.load(file)
             return data
+
+    def _write_csv(self, list_of_dicts, file_path):
+        with open(file_path, mode='w', newline='') as file:
+            # Define the fieldnames (this will be the header row in the CSV)
+            fieldnames = list_of_dicts[0].keys()
+
+            # Create a DictWriter object
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+            # Write the header row
+            writer.writeheader()
+
+            # Write data rows
+            writer.writerows(list_of_dicts)
 
     def write_known_ips(self):
         data = self.known_ips
