@@ -2,6 +2,7 @@ import configparser
 import csv
 import json
 import logging
+import requests
 import sys
 
 from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
@@ -65,6 +66,24 @@ class LogReader(object):
         data = self.known_ips
         with open(KNOWN_IPS_LIST, 'w') as file:
             json.dump(data, file, indent=4)
+
+    def abuse_ipdb_check_ip(self, ip_address):
+        url = f'https://api.abuseipdb.com/api/v2/check'
+        headers = {
+            "Key": ABUSEIPDB_API_KEY,
+            "Accept": "application/json"
+        }
+        params = {
+            "ipAddress": ip_address,
+            "maxAgeInDays": 90,
+            "verbose": True
+        }
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Request failed with status code {response.status_code}", "details": response.text}
+
 
 
 
