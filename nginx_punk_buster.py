@@ -98,17 +98,27 @@ class NginxErrorLogReader(LogReader):
         with open(self.log_location, 'r') as file:
             for line in file:
                 try:
+                    logger.debug(f'Attempting to parse nginx error log: {line}')
                     parsed = self.log_line.parseString(line)
-                    parsed['datetime'] = f'{parsed['date']} {parsed['time']}'
-                    logger.debug(f'Parsed line: {parsed}')
-                    logger.debug(f'Client IP: {parsed["client_ip"]}')
-                    logger.debug(f'Datetime: {parsed["datetime"]}')
                     if parsed['client_ip'] not in self.known_ips.values():
-                        parsed_results.append(parsed)
+                        parsed['datetime'] = f'{parsed['date']} {parsed['time']}'
+                        parsed_dict = {
+                            'Datetime': parsed['datetime'],
+                            'ClientIP': parsed['client_ip'],
+                            'HTTP_Code': parsed['http_code'],
+                            'Severity': parsed['fields']['severity'],
+                            'Message': parsed['fields']['msg'],
+                            'URI': parsed['fields']['uri']
+                        }
+                        parsed_results.append(parsed_dict)
+                        logger.debug(f'Parsed line: {parsed}')
+
 
                 except Exception as e:
                     logger.error(f'Failed to parse line: {line}')
+                    # TODO: Save lines that were not parsed for later analysis
                     logger.error(f'Error: {e}')
+
 
         return parsed_results
 
