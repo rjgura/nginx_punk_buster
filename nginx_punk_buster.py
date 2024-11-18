@@ -1,12 +1,14 @@
 import configparser
 import csv
+import ipaddress
 import json
 import logging
+import re
 import requests
 import sqlite3
 import sys
 
-
+from datetime import datetime
 from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
     removeQuotes, SkipTo, ParseResults
 
@@ -14,7 +16,8 @@ CONFIG_PATH = r'LocalConfig/Settings.ini'
 NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
-SQLite_DB = 'nginx_punk_buster.db'
+SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
+BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -37,6 +40,21 @@ try:
 except KeyError:
     logger.error('Error loading config file: check that file exists and settings inside are correct')
     quit()
+
+# Register adapters and converters for datetime
+def adapt_datetime(dt):
+    """Convert datetime to string for storage."""
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def convert_datetime(value):
+    """Convert string back to datetime object."""
+    return datetime.strptime(value.decode("utf-8"), "%Y-%m-%d %H:%M:%S")
+
+
+# Register the adapter and converter
+sqlite3.register_adapter(datetime, adapt_datetime)
+sqlite3.register_converter("DATETIME", convert_datetime)
 
 
 class LogReader(object):
@@ -90,6 +108,54 @@ class LogReader(object):
     def create_sqlite_connection(self, db_name=SQLite_DB):
         conn = sqlite3.connect(db_name)
         return conn
+
+    def load_current_blacklist(self):
+        conn = self.create_sqlite_connection()
+        query =  """
+        CREATE TABLE IF NOT EXISTS blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT NOT NULL UNIQUE,
+            date_added DATETIME NOT NULL
+    )
+    """
+        conn.execute(query)
+        conn.commit()
+
+        with open(BLACKLIST_LOCATION, 'r') as file:
+            logger.info(f'Loading current blacklist to SQLite: {BLACKLIST_LOCATION}')
+            data = file.read()
+            entries = re.findall(r'address ([\d./]+)', data)
+
+            # Function to validate IPs or subnets
+            def is_valid_ip_or_subnet(entry):
+                try:
+                    # Check if it is an IP or subnet
+                    ipaddress.ip_network(entry, strict=False)  # Handles both cases
+                    return True
+                except ValueError:
+                    return False
+
+            valid_entries = [entry for entry in entries if is_valid_ip_or_subnet(entry)]
+
+            now = datetime.now()
+            cursor = conn.cursor()
+            data_to_insert = [(entry, now) for entry in valid_entries]
+            cursor.executemany(
+                "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
+                data_to_insert
+            )
+
+            conn.commit()
+            conn.close()
+            logger.info(f'Loading current blacklist to SQLite completed successfully')
+
+
+
+
+
+
+
+
 
 
 
@@ -252,11 +318,17 @@ class LogReaderFactory:
 
 def main():
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
-    readit.parse_log_file()
-    readit.print_log_to_console()
-    readit.write_known_ips()
-    readit.write_ban_list_csv()
-    readit.write_parsed_results_csv()
+
+    readit.load_current_blacklist()
+
+    # readit.parse_log_file()
+    # readit.print_log_to_console()
+    # readit.write_known_ips()
+    # readit.write_ban_list_csv()
+    # readit.write_parsed_results_csv()
+
+
+
     # print(log_results[0]['client_ip'])
     # print(log_results[0]['datetime'])
     # print(log_results[0]['date'])
