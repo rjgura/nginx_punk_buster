@@ -139,6 +139,8 @@ class NginxErrorLogReader(LogReader):
                     # TODO: Save lines that were not parsed for later analysis
                     logger.error(f'Error: {e}')
 
+        self._create_ban_list()
+
 
     def print_log_to_console(self):
         if self.parsed_results is not None:
@@ -154,8 +156,14 @@ class NginxErrorLogReader(LogReader):
     def _remove_known_ips(self):
         pass
 
-    def _de_dupe_logs(self):
-        pass
+    def _create_ban_list(self):
+        self.ban_list = []
+        for result in self.parsed_results:
+            ip = result['ClientIP']
+            if ip not in [entry['ClientIP'] for entry in self.ban_list]:
+                ip_count = sum(1 for entry in self.parsed_results if entry.get('ClientIP') == ip)
+                result['Count'] = ip_count
+                self.ban_list.append(result)
 
 
 
