@@ -3,7 +3,7 @@ import logging
 import sys
 
 from pyparsing import Word, nums, alphas, alphanums, Suppress, quotedString, Group, Combine, OneOrMore, delimitedList, \
-    ParseException, Regex, Optional, Literal, removeQuotes, SkipTo
+    ParseException, Regex, Optional, Literal, removeQuotes, SkipTo, ParseResults
 
 NGINX_ERROR_LOG = r'LocalConfig/error.log'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
@@ -45,6 +45,7 @@ class NginxErrorLogReader(LogReader):
     def __init__(self, log_location):
         super().__init__(log_location)
         # Define basic components of a log entry
+        self.parsed_results = []
         self.integer = Word(nums)
         self.ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
         self.datetime_part = Combine(Word(nums, exact=4) + '/' +
@@ -57,7 +58,7 @@ class NginxErrorLogReader(LogReader):
         self.request_id = Suppress(':') + Suppress('*') + self.integer
 
         # Define other parts of the log entry
-        self.datetime_expr = (self.datetime_part("date") + self.time_part("time"))
+        self.datetime_expr = Combine(self.datetime_part + ' ' + self.time_part)('datetime')
         self.error_level = Literal("[error]")
         # self.client_expr = Suppress("[client") + self.ip_address + Suppress("]")
         self.client_expr = (Optional(Suppress("[client")) +
@@ -72,11 +73,8 @@ class NginxErrorLogReader(LogReader):
             quotedString.setParseAction(removeQuotes)('value') +
             Suppress(']')
         )
-        self.fields = Group(self.field_value[...])
-        # self.msg = (Optional(Suppress('[')) +
-        #             Literal('msg') +
-        #             quotedString.setParseAction(removeQuotes) +
-        #             Optional(Suppress(']')))
+        self.fields = (self.field_value[...])
+        self.fields.setParseAction(self._fields_to_dict)
 
         # Define the full line structure
         self.log_line = (
@@ -88,20 +86,40 @@ class NginxErrorLogReader(LogReader):
             self.http_code("http_code") +
             Optional(SkipTo('[')) +
             self.fields('fields') +
-            # self.msg("msg") +
             Optional(Regex(".*"))  # Capture the remaining part of the message if needed
         )
 
+    def _fields_to_dict(self, tokens):
+        fields = {}
+        for token in tokens:
+            # Check if the token is a ParseResults with named fields
+            if isinstance(token, ParseResults) and 'field' in token and 'value' in token:
+                key, value = token['field'], token['value']
+            elif isinstance(token, list) and len(token) == 2:
+                key, value = token  # For flat tokens
+            else:
+                logger.error(f"Unexpected token format: {token}")
+                continue
+
+            # Handle duplicate keys
+            if key in fields:
+                if isinstance(fields[key], list):
+                    fields[key].append(value)
+                else:
+                    fields[key] = [fields[key], value]
+            else:
+                fields[key] = value
+
+        return fields
+
     # Function to parse each line of the log file
     def parse_log_file(self):
-        parsed_results = []
         with open(self.log_location, 'r') as file:
             for line in file:
                 try:
                     logger.debug(f'Attempting to parse nginx error log: {line}')
                     parsed = self.log_line.parseString(line)
                     if parsed['client_ip'] not in self.known_ips.values():
-                        parsed['datetime'] = f'{parsed['date']} {parsed['time']}'
                         parsed_dict = {
                             'Datetime': parsed['datetime'],
                             'ClientIP': parsed['client_ip'],
@@ -110,8 +128,10 @@ class NginxErrorLogReader(LogReader):
                             'Message': parsed['fields']['msg'],
                             'URI': parsed['fields']['uri']
                         }
-                        parsed_results.append(parsed_dict)
+                        logger.debug(f'Attempting to append with: {parsed_dict}')
+                        self.parsed_results.append(parsed_dict)
                         logger.debug(f'Parsed line: {parsed}')
+                        # TODO: Send known IP lines to their own dictionary
 
 
                 except Exception as e:
@@ -120,14 +140,13 @@ class NginxErrorLogReader(LogReader):
                     logger.error(f'Error: {e}')
 
 
-        return parsed_results
+    def print_log_to_console(self):
+        if self.parsed_results is not None:
+            for result in self.parsed_results:
+                print(result)
+        else:
+            logger.error(f'There are no parsed results to print')
 
-    def print_log_to_console(self, parsed_results):
-        for result in parsed_results:
-            if result['client_ip'] in self.known_ips.values():
-                print(f'{result['date']} {result['time']} {result['client_ip']} FRIENDLY')
-            else:
-                print(f'{result['date']} {result['time']} {result['client_ip']}')
 
     def aggregate_logs(self):
         self._remove_known_ips()
@@ -157,17 +176,17 @@ class LogReaderFactory:
 
 def main():
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
-    log_results = readit.parse_log_file()
-    readit.print_log_to_console(log_results)
+    readit.parse_log_file()
+    readit.print_log_to_console()
     readit.write_known_ips()
     # print(log_results[0]['client_ip'])
     # print(log_results[0]['datetime'])
     # print(log_results[0]['date'])
     # print(log_results[0]['time'])
-    print(log_results[0]['http_code'])
+    # print(log_results[0]['http_code'])
     # print(log_results[0]['msg'])
-    for field in log_results[0]['fields']:
-        print(field)
+    # for field in log_results[0]['fields']:
+        # print(field)
 
 if __name__ == '__main__':
     main()
