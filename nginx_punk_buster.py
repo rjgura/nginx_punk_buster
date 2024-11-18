@@ -3,7 +3,9 @@ import csv
 import json
 import logging
 import requests
+import sqlite3
 import sys
+
 
 from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
     removeQuotes, SkipTo, ParseResults
@@ -12,6 +14,7 @@ CONFIG_PATH = r'LocalConfig/Settings.ini'
 NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
+SQLite_DB = 'nginx_punk_buster.db'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -83,6 +86,11 @@ class LogReader(object):
             return response.json()
         else:
             return {"error": f"Request failed with status code {response.status_code}", "details": response.text}
+
+    def create_sqlite_connection(self, db_name=SQLite_DB):
+        conn = sqlite3.connect(db_name)
+        return conn
+
 
 
 
