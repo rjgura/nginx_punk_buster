@@ -64,10 +64,24 @@ class LogReader(object):
         self.log_location = log_location
         self.known_ips = self._get_known_ips()
 
+    # Function to validate IPs or subnets
+    def _is_valid_ip_or_subnet(self, entry):
+        try:
+            # Check if it is an IP or subnet
+            ipaddress.ip_network(entry, strict=False)  # Handles both cases
+            return True
+        except ValueError:
+            return False
+
     def _get_known_ips(self):
         with open(KNOWN_IPS_LIST, 'r') as file:
             data = json.load(file)
             return data
+
+    def _write_known_ips(self):
+        data = self.known_ips
+        with open(KNOWN_IPS_LIST, 'w') as file:
+            json.dump(data, file, indent=4)
 
     def _write_csv(self, list_of_dicts, file_path):
         with open(file_path, mode='w', newline='') as file:
@@ -83,10 +97,118 @@ class LogReader(object):
             # Write data rows
             writer.writerows(list_of_dicts)
 
-    def write_known_ips(self):
-        data = self.known_ips
-        with open(KNOWN_IPS_LIST, 'w') as file:
-            json.dump(data, file, indent=4)
+    def create_sqlite_connection(self, db_name=SQLite_DB):
+        conn = sqlite3.connect(db_name)
+        return conn
+
+    def _table_exists(self, cursor, table_name):
+        cursor.execute("""
+            SELECT name FROM sqlite_master WHERE type='table' AND name=?;
+        """, (table_name,))
+        return cursor.fetchone() is not None
+
+    def insert_into_blacklist(self):
+        conn = self.create_sqlite_connection()
+        query =  """
+        CREATE TABLE IF NOT EXISTS blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT NOT NULL UNIQUE,
+            date_added DATETIME NOT NULL
+    )
+    """
+        conn.execute(query)
+        conn.commit()
+
+        with open(BLACKLIST_LOCATION, 'r') as file:
+            logger.info(f'Loading current blacklist to SQLite: {BLACKLIST_LOCATION}')
+            data = file.read()
+            entries = re.findall(r'address ([\d./]+)', data)
+
+            valid_entries = [entry for entry in entries if self._is_valid_ip_or_subnet(entry)]
+
+            now = datetime.now()
+            cursor = conn.cursor()
+            data_to_insert = [(entry, now) for entry in valid_entries]
+            cursor.executemany(
+                "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
+                data_to_insert
+            )
+
+            conn.commit()
+            conn.close()
+            logger.info(f'Loading current blacklist to SQLite completed successfully')
+
+    def insert_into_abuse_ip_db(self, conn, ip_address, abuse_confidence_score,
+                                reported_count, distinct_reporter_count,
+                                country_code, country_name,
+                                usage_type, isp, domain,
+                                is_public, is_whitelisted, is_tor,
+                                last_reported, date_added):
+        query = """
+            CREATE TABLE IF NOT EXISTS abuse_ip_db (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT NOT NULL UNIQUE,
+                abuse_confidence_score INTEGER,
+                reported_count INTEGER,
+                distinct_reporter_count INTEGER,
+                country_code TEXT,
+                country_name TEXT,
+                usage_type TEXT,
+                isp TEXT,
+                domain TEXT,
+                is_public TEXT,
+                is_whitelisted TEXT,
+                is_tor TEXT,
+                last_reported_at DATETIME,
+                date_added DATETIME NOT NULL
+        )
+        """
+        conn.execute(query)
+        conn.commit()
+
+        """Insert data into the table."""
+        query = """
+        INSERT INTO abuse_ip_data (ip_address, abuse_confidence_score, reported_count,
+        distinct_reporter_count, country_code, country_name, usage_type, isp, domain,
+        is_public, is_whitelisted, is_tor, last_reported, date_added)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        conn.execute(query, (ip_address, abuse_confidence_score, reported_count, distinct_reporter_count,
+                             country_code, country_name,
+                             usage_type, isp, domain,
+                             is_public, is_whitelisted, is_tor, last_reported, date_added))
+        conn.commit()
+
+
+    def get_all_data_as_dict(self, conn):
+        """Fetch all data and return as a list of dictionaries."""
+        conn.row_factory = sqlite3.Row  # Enables dictionary-like access
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM abuse_ip_db")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+    def add_abuseipdb_for_blacklist_ips(self):
+        # Add info from AbuseIPDB to abuse_ip_db table in SQLite
+        # for each IP address in blacklist table
+        conn = self.create_sqlite_connection()
+        cursor = conn.cursor()
+
+        try:
+            if self._table_exists(cursor, 'blacklist'):
+                cursor.execute('SELECT ip_address FROM blacklist')
+                ip_addresses = [row[0] for row in cursor.fetchall()]
+            else:
+                logger.info(f'blacklist has not been created in SQLite yet, add a blacklist table')
+                quit()
+            if self._table_exists(cursor, 'abuse_ip_db'):
+                cursor.execute('SELECT ip_address FROM abuse_ip_db')
+                abuse_ips = [row[0] for row in cursor.fetchall()]
+            else:
+                logger.info(f'abuse_ip_db has not been created in SQLite yet, skipping for now')
+        except sqlite3.OperationalError as e:
+            logger.error(f'Error while updating AbuseIPDB: {e}')
 
     def abuse_ipdb_check_ip(self, ip_address):
         url = f'https://api.abuseipdb.com/api/v2/check'
@@ -105,49 +227,9 @@ class LogReader(object):
         else:
             return {"error": f"Request failed with status code {response.status_code}", "details": response.text}
 
-    def create_sqlite_connection(self, db_name=SQLite_DB):
-        conn = sqlite3.connect(db_name)
-        return conn
 
-    def load_current_blacklist(self):
-        conn = self.create_sqlite_connection()
-        query =  """
-        CREATE TABLE IF NOT EXISTS blacklist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ip_address TEXT NOT NULL UNIQUE,
-            date_added DATETIME NOT NULL
-    )
-    """
-        conn.execute(query)
-        conn.commit()
 
-        with open(BLACKLIST_LOCATION, 'r') as file:
-            logger.info(f'Loading current blacklist to SQLite: {BLACKLIST_LOCATION}')
-            data = file.read()
-            entries = re.findall(r'address ([\d./]+)', data)
 
-            # Function to validate IPs or subnets
-            def is_valid_ip_or_subnet(entry):
-                try:
-                    # Check if it is an IP or subnet
-                    ipaddress.ip_network(entry, strict=False)  # Handles both cases
-                    return True
-                except ValueError:
-                    return False
-
-            valid_entries = [entry for entry in entries if is_valid_ip_or_subnet(entry)]
-
-            now = datetime.now()
-            cursor = conn.cursor()
-            data_to_insert = [(entry, now) for entry in valid_entries]
-            cursor.executemany(
-                "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
-                data_to_insert
-            )
-
-            conn.commit()
-            conn.close()
-            logger.info(f'Loading current blacklist to SQLite completed successfully')
 
 
 
