@@ -4,10 +4,6 @@ import ipaddress
 import json
 import logging
 import re
-from http.cookiejar import domain_match
-from pydoc import ispath
-from xmlrpc.server import list_public_methods
-
 import requests
 import sqlite3
 import sys
@@ -17,7 +13,7 @@ from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Comb
     removeQuotes, SkipTo, ParseResults
 
 CONFIG_PATH = r'LocalConfig/Settings.ini'
-NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
+NGINX_ERROR_LOG = r'LocalConfig/error.log'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
 SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
@@ -261,6 +257,7 @@ class LogReader(object):
         }
         response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
+            logger.debug(f'AbuseIPDB API Response Code: {response.status_code}')
             data = response.json()['data']
             return data
         else:
@@ -394,6 +391,54 @@ class NginxErrorLogReader(LogReader):
                 result['Count'] = ip_count
                 self.ban_list.append(result)
 
+    def add_abuseipdb_for_ban_list(self):
+        # Add info from AbuseIPDB to abuse_ip_db table in SQLite
+        # for each IP address in the ban list
+        conn = self.create_sqlite_connection()
+        cursor = conn.cursor()
+
+        try:
+            if self._table_exists(cursor, 'abuse_ip_db'):
+                cursor.execute('SELECT ip_address FROM abuse_ip_db')
+                # Get list of IPs from abuse_ip_db, because I don't want to call API if already in there
+                abuse_ips = [row[0] for row in cursor.fetchall()]
+            else:
+                logger.info(f'abuse_ip_db has not been created in SQLite yet, skipping for now')
+                abuse_ips = []
+
+        except sqlite3.OperationalError as e:
+            logger.error(f'Error while updating AbuseIPDB: {e}')
+
+        logger.debug(f'Beginning Loop Through Ban List IP Addresses')
+        for entry in self.ban_list:
+            if entry['ClientIP'] not in abuse_ips:
+                logger.debug(f'Calling AbuseIPDB API for: {entry['ClientIP']}')
+                data = self.abuse_ipdb_check_ip(entry['ClientIP'])
+                logger.debug(f'Received AbuseIPDB Data: {data}')
+                abuse_confidence_score = data.get('abuseConfidenceScore', 0)
+                reported_count = data.get('totalReports', 0)
+                distinct_reporter_count = data.get('numDistinctUsers', 0)
+                country_code = data.get('countryCode', '??')
+                country_name = data.get('countryName', 'Unknown')
+                usage_type = data.get('usageType')
+                isp = data.get('isp')
+                domain = data.get('domain')
+                is_public = data.get('isPublic')
+                is_whitelisted = data.get('isWhitelisted')
+                is_tor = data.get('isTor')
+                last_reported_at = data.get('lastReportedAt')
+                date_added = datetime.now()
+
+                logger.debug(f'Inserting AbuseIPDB Data into abuse_ip_db table in SQLite')
+                self.insert_into_abuse_ip_db(cursor, entry['ClientIP'], abuse_confidence_score,
+                                             reported_count, distinct_reporter_count,
+                                             country_code, country_name, usage_type, isp,
+                                             domain, is_public, is_whitelisted, is_tor,
+                                             last_reported_at, date_added)
+
+        conn.commit()
+        conn.close()
+
     def write_ban_list_csv(self):
         file_name = r'ban_list.csv'
         csv_path = CSV_PATH + file_name
@@ -426,26 +471,21 @@ class LogReaderFactory:
 def main():
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
 
-    readit.add_abuseipdb_for_blacklist_ips()
+    # Add data from AbuseIPDB API to abuse_ip_db using Blacklisted IPs
+    # readit.add_abuseipdb_for_blacklist_ips()
 
+    # Update list of Blacklisted IPs
     # readit.load_current_blacklist()
 
-    # readit.parse_log_file()
+    # Read nginx error log and spit out csv
+    readit.parse_log_file()
+    #readit.write_ban_list_csv()
+    #readit.write_parsed_results_csv()
+    readit.add_abuseipdb_for_ban_list()
+
     # readit.print_log_to_console()
     # readit.write_known_ips()
-    # readit.write_ban_list_csv()
-    # readit.write_parsed_results_csv()
 
-
-
-    # print(log_results[0]['client_ip'])
-    # print(log_results[0]['datetime'])
-    # print(log_results[0]['date'])
-    # print(log_results[0]['time'])
-    # print(log_results[0]['http_code'])
-    # print(log_results[0]['msg'])
-    # for field in log_results[0]['fields']:
-        # print(field)
 
 if __name__ == '__main__':
     main()
