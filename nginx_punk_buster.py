@@ -4,6 +4,10 @@ import ipaddress
 import json
 import logging
 import re
+from http.cookiejar import domain_match
+from pydoc import ispath
+from xmlrpc.server import list_public_methods
+
 import requests
 import sqlite3
 import sys
@@ -138,12 +142,12 @@ class LogReader(object):
             conn.close()
             logger.info(f'Loading current blacklist to SQLite completed successfully')
 
-    def insert_into_abuse_ip_db(self, conn, ip_address, abuse_confidence_score,
+    def insert_into_abuse_ip_db(self, cursor, ip_address, abuse_confidence_score,
                                 reported_count, distinct_reporter_count,
                                 country_code, country_name,
                                 usage_type, isp, domain,
                                 is_public, is_whitelisted, is_tor,
-                                last_reported, date_added):
+                                last_reported_at, date_added):
         query = """
             CREATE TABLE IF NOT EXISTS abuse_ip_db (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,21 +167,20 @@ class LogReader(object):
                 date_added DATETIME NOT NULL
         )
         """
-        conn.execute(query)
-        conn.commit()
+        cursor.execute(query)
 
         """Insert data into the table."""
-        query = """
-        INSERT INTO abuse_ip_data (ip_address, abuse_confidence_score, reported_count,
+        insert_query = """
+        INSERT OR IGNORE INTO abuse_ip_db (ip_address, abuse_confidence_score, reported_count,
         distinct_reporter_count, country_code, country_name, usage_type, isp, domain,
-        is_public, is_whitelisted, is_tor, last_reported, date_added)
+        is_public, is_whitelisted, is_tor, last_reported_at, date_added)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        conn.execute(query, (ip_address, abuse_confidence_score, reported_count, distinct_reporter_count,
+        cursor.execute(insert_query, (ip_address, abuse_confidence_score, reported_count, distinct_reporter_count,
                              country_code, country_name,
                              usage_type, isp, domain,
-                             is_public, is_whitelisted, is_tor, last_reported, date_added))
-        conn.commit()
+                             is_public, is_whitelisted, is_tor, last_reported_at, date_added))
+
 
 
     def get_all_data_as_dict(self, conn):
@@ -198,17 +201,52 @@ class LogReader(object):
         try:
             if self._table_exists(cursor, 'blacklist'):
                 cursor.execute('SELECT ip_address FROM blacklist')
+                # Get list of IPs from the blacklist table
                 ip_addresses = [row[0] for row in cursor.fetchall()]
             else:
                 logger.info(f'blacklist has not been created in SQLite yet, add a blacklist table')
                 quit()
             if self._table_exists(cursor, 'abuse_ip_db'):
                 cursor.execute('SELECT ip_address FROM abuse_ip_db')
+                # Get list of IPs from abuse_ip_db, because I don't want to call API if already in there
                 abuse_ips = [row[0] for row in cursor.fetchall()]
             else:
                 logger.info(f'abuse_ip_db has not been created in SQLite yet, skipping for now')
+                abuse_ips = []
+
         except sqlite3.OperationalError as e:
             logger.error(f'Error while updating AbuseIPDB: {e}')
+
+        logger.debug(f'Beginning Loop Through Blacklist IP Addresses')
+        for ip_address in ip_addresses:
+            if ip_address not in abuse_ips:
+                logger.debug(f'Calling AbuseIPDB API for: {ip_address}')
+                data = self.abuse_ipdb_check_ip(ip_address)
+                logger.debug(f'Received AbuseIPDB Data: {data}')
+                abuse_confidence_score = data.get('abuseConfidenceScore', 0)
+                reported_count = data.get('totalReports', 0)
+                distinct_reporter_count = data.get('numDistinctUsers', 0)
+                country_code = data.get('countryCode', '??')
+                country_name = data.get('countryName', 'Unknown')
+                usage_type = data.get('usageType')
+                isp = data.get('isp')
+                domain = data.get('domain')
+                is_public = data.get('isPublic')
+                is_whitelisted = data.get('isWhitelisted')
+                is_tor = data.get('isTor')
+                last_reported_at = data.get('lastReportedAt')
+                date_added = datetime.now()
+
+                logger.debug(f'Inserting AbuseIPDB Data into abuse_ip_db table in SQLite')
+                self.insert_into_abuse_ip_db(cursor, ip_address,abuse_confidence_score,
+                                             reported_count, distinct_reporter_count,
+                                             country_code, country_name, usage_type, isp,
+                                             domain, is_public, is_whitelisted, is_tor,
+                                             last_reported_at, date_added)
+
+        conn.commit()
+        conn.close()
+
 
     def abuse_ipdb_check_ip(self, ip_address):
         url = f'https://api.abuseipdb.com/api/v2/check'
@@ -223,23 +261,10 @@ class LogReader(object):
         }
         response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()['data']
+            return data
         else:
             return {"error": f"Request failed with status code {response.status_code}", "details": response.text}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -401,7 +426,9 @@ class LogReaderFactory:
 def main():
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
 
-    readit.load_current_blacklist()
+    readit.add_abuseipdb_for_blacklist_ips()
+
+    # readit.load_current_blacklist()
 
     # readit.parse_log_file()
     # readit.print_log_to_console()
