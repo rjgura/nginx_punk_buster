@@ -26,7 +26,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
 UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
-UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/673ed5dbf46fb86a9ec2c34a'
+UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/65337212ce5caf38ad0796f6'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -244,6 +244,35 @@ class LogReader(object):
             logger.error(f'UBNT API logout failed. Status Code: {login_response.status_code}')
             logger.debug(f'{login_response.json()}')
 
+    def insert_into_blacklist(self, list_to_insert):
+        logger.debug(f'Starting an insert into the blacklist table in SQLite')
+        if not isinstance(list_to_insert, list):
+            raise TypeError('list_to_insert should be a list')
+
+        conn = self.create_sqlite_connection()
+        query = """
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_address TEXT NOT NULL UNIQUE,
+                    date_added DATETIME NOT NULL
+            )
+            """
+        conn.execute(query)
+        conn.commit()
+
+        valid_entries = [entry for entry in list_to_insert if self._is_valid_ip_or_subnet(entry)]
+
+        now = datetime.now()
+        cursor = conn.cursor()
+        data_to_insert = [(entry, now) for entry in valid_entries]
+        cursor.executemany(
+            "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
+            data_to_insert
+        )
+
+        conn.commit()
+        conn.close()
+        logger.info(f'Insert into blacklist table in SQLite completed successfully')
 
 
 
@@ -638,8 +667,9 @@ def main():
 
     readit.write_ban_list_csv()
     #readit.write_parsed_results_csv()
-    #readit.set_ubnt_blacklist(readit.ban_list)
-    # readit.add_abuseipdb_for_ban_list()
+    readit.set_ubnt_blacklist(readit.ban_list_ips)
+    readit.insert_into_blacklist(readit.ban_list_ips)
+    readit.add_abuseipdb_for_ban_list()
 
     # readit.print_log_to_console()
     # readit.write_known_ips()
