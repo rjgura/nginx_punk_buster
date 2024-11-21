@@ -654,22 +654,36 @@ def main():
     # readit.load_current_blacklist()
 
     new_list = [
-        "138.197.27.249",
-        "66.240.236.116",
-        "4.151.230.245",
-        "70.39.75.151"
+        '192.189.2.218',
+        '20.118.68.251',
+        '104.209.34.203',
+        '70.39.75.135',
+        '4.151.229.99',
+        '104.40.75.76',
+        '66.94.114.121',
+        '81.161.238.40',
+        '47.251.103.74',
+        '4.246.246.232',
+        '193.177.182.8',
+        '20.225.3.119',
+        '138.197.27.249',
+        '66.240.236.116',
+        '4.151.230.245',
+        '70.39.75.151'
     ]
 
 
     # Read nginx error log and spit out csv
-    readit.parse_log_file()
+    #readit.parse_log_file()
     #readit.set_ubnt_blacklist(new_list)
 
-    readit.write_ban_list_csv()
+    #readit.write_ban_list_csv()
     #readit.write_parsed_results_csv()
-    readit.set_ubnt_blacklist(readit.ban_list_ips)
-    readit.insert_into_blacklist(readit.ban_list_ips)
-    readit.add_abuseipdb_for_ban_list()
+    #readit.set_ubnt_blacklist(readit.ban_list_ips)
+    #readit.insert_into_blacklist(readit.ban_list_ips)
+    #readit.add_abuseipdb_for_ban_list()
+
+    # readit.insert_into_blacklist(new_list)
 
     # readit.print_log_to_console()
     # readit.write_known_ips()
