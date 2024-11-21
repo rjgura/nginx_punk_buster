@@ -9,6 +9,8 @@ import sqlite3
 import sys
 
 from datetime import datetime
+
+import urllib3
 from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
     removeQuotes, SkipTo, ParseResults
 
@@ -18,6 +20,9 @@ KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
 SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
+
+# Disable SSL verification warning globally
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
 UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
@@ -124,7 +129,7 @@ class LogReader(object):
         session.verify = False  # Disable SSL verification (optional)
 
         # Authenticate and get the session ID
-        login_response = session.post(UBNT_LOGIN_URL, json=UBNT_LOGIN_PAYLOAD)
+        login_response = session.post(UBNT_LOGIN_URL, json=UBNT_LOGIN_PAYLOAD, verify=False)
 
         if login_response.status_code == 200:
             logger.debug(f'UBNT API login successful')
@@ -140,9 +145,9 @@ class LogReader(object):
             "Cookie": f"unifises={session_id}"  # Include the session ID cookie
         }
 
-        firewall_group_response = session.get(UBNT_FW_GROUP_URL, headers=headers)
+        firewall_group_response = session.get(UBNT_FW_GROUP_URL, headers=headers, verify=False)
         data = firewall_group_response.json()
-        logout_response = session.post(UBNT_LOGOUT_URL)
+        logout_response = session.post(UBNT_LOGOUT_URL, verify=False)
         if logout_response.status_code == 200:
             logger.info(f'UBNT API logout successful')
 
@@ -151,6 +156,96 @@ class LogReader(object):
             logger.debug(f'{login_response.json()}')
 
         return data['data'][0]['group_members']
+
+    def set_ubnt_blacklist(self, list_to_add):
+        logger.debug(f'Starting an update to the UBNT Blacklist')
+        if not isinstance(list_to_add, list):
+            raise TypeError('list_to_add should be a list')
+
+        if not list_to_add:
+            logger.warning(f'The list is empty, nothing to add to Blacklist')
+            return 1
+
+        # Disable SSL verification (use caution in production)
+        session = requests.Session()
+        session.verify = False  # Disable SSL verification (optional)
+
+        # Authenticate and get the session ID
+        logger.debug(f'Logging into UBNT API')
+        login_response = session.post(UBNT_LOGIN_URL, json=UBNT_LOGIN_PAYLOAD, verify=False)
+
+        if login_response.status_code == 200:
+            logger.debug(f'UBNT API login successful')
+            # Extract the session cookie after successful login
+            session_id = session.cookies.get('unifises')
+        else:
+            logger.error(f"UBNT API login failed. Status Code: {login_response.status_code}")
+            logger.debug(f'{login_response.json()}')
+            exit()
+
+        headers = {
+            "Content-Type": "application/json",
+            "Cookie": f"unifises={session_id}"  # Include the session ID cookie
+        }
+
+        # Refresh self.ubnt_blacklist so that we don't lose any IPs from the list
+        logger.debug(f'Getting Firewall Group for Blacklist')
+        firewall_group_response = session.get(UBNT_FW_GROUP_URL, headers=headers, verify=False)
+
+        if firewall_group_response.status_code == 200:
+            logger.info(f'Firewall Group for Blacklist fetched successfully')
+
+        else:
+            logger.error(f"Could not get firewall group for Blacklist. Status Code: {login_response.status_code}")
+            logger.error(f'Could not get the latest UBNT Blacklist, stopping update attempt')
+            logger.debug(f'{login_response.json()}')
+            quit()
+
+        data = firewall_group_response.json()
+        self.ubnt_blacklist.clear()
+        self.ubnt_blacklist = data['data'][0]['group_members']
+
+        list_to_add = [entry for entry in list_to_add if entry not in self.ubnt_blacklist]
+
+        if list_to_add:
+
+            updated_blacklist = self.ubnt_blacklist + list_to_add
+
+            # Prepare the payload (data to be sent in the body of the PUT request)
+            payload = {
+                "group_members": updated_blacklist,
+            }
+
+            # Send the PUT request
+            update_response = requests.put(
+                UBNT_FW_GROUP_URL,
+                headers=headers,
+                data=json.dumps(payload),
+                verify=False  # Disable SSL verification (optional, use with caution)
+            )
+
+            # Check the response
+            if update_response.status_code == 200:
+                logger.info(f'Updated the UBNT Blacklist successfully')
+                print(update_response.json())
+            else:
+                print(f'Failed to update group. Status Code: {update_response.status_code}')
+                print(update_response.json())
+
+        else:
+            logger.warning(f'No new IPs to add to Blacklist')
+
+        logout_response = session.post(UBNT_LOGOUT_URL, verify=False)
+        if logout_response.status_code == 200:
+            logger.debug(f'UBNT API logout successful')
+
+
+        else:
+            logger.error(f'UBNT API logout failed. Status Code: {login_response.status_code}')
+            logger.debug(f'{login_response.json()}')
+
+
+
 
     def insert_into_blacklist_from_file(self):
         # Will read a text file in format address <ip_address>
@@ -527,6 +622,17 @@ def main():
 
     # Read nginx error log and spit out csv
     readit.parse_log_file()
+
+    new_list = [
+        "45.129.14.71",
+        "118.179.203.50",
+        "156.220.208.167",
+        "135.125.216.246",
+        "198.235.24.202",
+        "81.161.238.40"
+    ]
+
+    readit.set_ubnt_blacklist(new_list)
     # readit.write_ban_list_csv()
     # readit.write_parsed_results_csv()
     # readit.add_abuseipdb_for_ban_list()
