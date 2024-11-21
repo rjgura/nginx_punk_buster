@@ -557,6 +557,7 @@ class NginxErrorLogReader(LogReader):
             Optional(Regex(".*"))  # Capture the remaining part of the message if needed
         )
 
+
     @staticmethod
     def _fields_to_dict(tokens):
         fields = {}
@@ -581,6 +582,7 @@ class NginxErrorLogReader(LogReader):
 
         return fields
 
+
     # Function to parse each line of the log file
     def parse_log_file(self):
         with open(self.log_location, 'r') as file:
@@ -602,7 +604,6 @@ class NginxErrorLogReader(LogReader):
                         logger.debug(f'Parsed line: {parsed}')
                         # TODO: Send known IP lines to their own dictionary
 
-
                 except Exception as e:
                     logger.error(f'Failed to parse line: {line}')
                     # TODO: Save lines that were not parsed for later analysis
@@ -618,12 +619,6 @@ class NginxErrorLogReader(LogReader):
         else:
             logger.error(f'There are no parsed results to print')
 
-
-    def aggregate_logs(self):
-        self._remove_known_ips()
-
-    def _remove_known_ips(self):
-        pass
 
     def _create_ban_list(self):
         self.ban_list = []
