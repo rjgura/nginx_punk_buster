@@ -170,7 +170,8 @@ class LogReader(object):
         """, (table_name,))
         return cursor.fetchone() is not None
 
-    def get_ubnt_blacklist(self):
+    @staticmethod
+    def get_ubnt_blacklist():
         # Disable SSL verification (use caution in production)
         session = requests.Session()
         session.verify = False  # Disable SSL verification (optional)
@@ -193,14 +194,25 @@ class LogReader(object):
         }
 
         firewall_group_response = session.get(UBNT_FW_GROUP_URL, headers=headers, verify=False)
+
+        if firewall_group_response.status_code == 200:
+            logger.info(f'UBNT Firewall group fetched successful')
+
+        else:
+            logger.error(f"Failed to get UBNT Firewall group. Status Code: {firewall_group_response.status_code}")
+            logger.debug(f'{firewall_group_response.json()}')
+            quit()
+
         data = firewall_group_response.json()
+
         logout_response = session.post(UBNT_LOGOUT_URL, verify=False)
+
         if logout_response.status_code == 200:
             logger.info(f'UBNT API logout successful')
 
         else:
-            logger.error(f"UBNT API logout failed. Status Code: {login_response.status_code}")
-            logger.debug(f'{login_response.json()}')
+            logger.error(f"UBNT API logout failed. Status Code: {logout_response.status_code}")
+            logger.debug(f'{logout_response.json()}')
 
         return data['data'][0]['group_members']
 
@@ -357,7 +369,8 @@ class LogReader(object):
             conn.close()
             logger.info(f'Loading current blacklist to SQLite completed successfully')
 
-    def insert_into_abuse_ip_db(self, cursor, ip_address, abuse_confidence_score,
+    @staticmethod
+    def insert_into_abuse_ip_db(cursor, ip_address, abuse_confidence_score,
                                 reported_count, distinct_reporter_count,
                                 country_code, country_name,
                                 usage_type, isp, domain,
@@ -398,7 +411,8 @@ class LogReader(object):
 
 
 
-    def get_all_data_as_dict(self, conn):
+    @staticmethod
+    def get_all_data_as_dict(conn):
         """Fetch all data and return as a list of dictionaries."""
         conn.row_factory = sqlite3.Row  # Enables dictionary-like access
         cursor = conn.cursor()
@@ -418,13 +432,16 @@ class LogReader(object):
                 cursor.execute('SELECT ip_address FROM blacklist')
                 # Get list of IPs from the blacklist table
                 ip_addresses = [row[0] for row in cursor.fetchall()]
+
             else:
                 logger.info(f'blacklist has not been created in SQLite yet, add a blacklist table')
                 quit()
+
             if self._table_exists(cursor, 'abuse_ip_db'):
                 cursor.execute('SELECT ip_address FROM abuse_ip_db')
                 # Get list of IPs from abuse_ip_db, because I don't want to call API if already in there
                 abuse_ips = [row[0] for row in cursor.fetchall()]
+
             else:
                 logger.info(f'abuse_ip_db has not been created in SQLite yet, skipping for now')
                 abuse_ips = []
@@ -463,7 +480,8 @@ class LogReader(object):
         conn.close()
 
 
-    def abuse_ipdb_check_ip(self, ip_address):
+    @staticmethod
+    def abuse_ipdb_check_ip(ip_address):
         url = f'https://api.abuseipdb.com/api/v2/check'
         headers = {
             "Key": ABUSEIPDB_API_KEY,
@@ -534,7 +552,8 @@ class NginxErrorLogReader(LogReader):
             Optional(Regex(".*"))  # Capture the remaining part of the message if needed
         )
 
-    def _fields_to_dict(self, tokens):
+    @staticmethod
+    def _fields_to_dict(tokens):
         fields = {}
         for token in tokens:
             # Check if the token is a ParseResults with named fields
@@ -679,6 +698,7 @@ class NginxErrorLogReader(LogReader):
 
 
 class LogReaderFactory:
+    # noinspection PyMethodMayBeStatic
     def create_log_reader(self, log_reader_type):
         if log_reader_type == 'NGINX Error Log':
             pass
