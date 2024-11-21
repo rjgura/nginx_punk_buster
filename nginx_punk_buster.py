@@ -7,10 +7,11 @@ import re
 import requests
 import sqlite3
 import sys
+import urllib3
 
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
-import urllib3
 from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
     removeQuotes, SkipTo, ParseResults
 
@@ -28,6 +29,11 @@ UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
 UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
 UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/65337212ce5caf38ad0796f6'
 
+LOG_FILENAME = r'LocalConfig/NginxPunkBuster.log'
+'''
+LOG_FILENAME = '/var/log/NginxPunkBuster.log' for Linux
+LOG_FILENAME = 'NginxPunkBuster.log' for Windows (Not tested)
+'''
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
 
@@ -38,6 +44,24 @@ sh = logging.StreamHandler(sys.stdout)
 sh.setLevel(logging.DEBUG)
 sh.setFormatter(FORMATTER)
 logger.addHandler(sh)
+
+fh = RotatingFileHandler(LOG_FILENAME,
+                         mode='a',
+                         maxBytes=5*1024*1024,
+                         backupCount=2,
+                         encoding=None,
+                         delay=False
+                         )
+
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(FORMATTER)
+logger.addHandler(fh)
+
+# Check if running on a linux system, but not from terminal
+# This fix stops output going to an unattached terminal if being run by cron
+if sys.platform[0:5] == 'linux' and not sys.stdout.isatty():
+    logger.debug(f'Script running in Linux with no Terminal Connected, removing stream handler')
+    logger.removeHandler(sh)
 
 config = configparser.ConfigParser()
 config.read(CONFIG_PATH)
