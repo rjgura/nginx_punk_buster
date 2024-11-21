@@ -13,11 +13,15 @@ from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Comb
     removeQuotes, SkipTo, ParseResults
 
 CONFIG_PATH = r'LocalConfig/Settings.ini'
-NGINX_ERROR_LOG = r'LocalConfig/error.log'
+NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
 CSV_PATH = r'LocalConfig/'
 SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
+
+UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
+UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
+UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/673e8652f46fb86a9ec297fd'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -36,6 +40,12 @@ config.read(CONFIG_PATH)
 logger.debug(f'Loading config file: {CONFIG_PATH}')
 try:
     ABUSEIPDB_API_KEY = config['CREDENTIALS']['AbuseIPDB_API_Key']
+    UBNT_USERNAME = config['CREDENTIALS']['UBNT_Username']
+    UBNT_PASSWORD = config['CREDENTIALS']['UBNT_Password']
+    UBNT_LOGIN_PAYLOAD = {
+        "username": UBNT_USERNAME,
+        "password": UBNT_PASSWORD
+    }
 
 except KeyError:
     logger.error('Error loading config file: check that file exists and settings inside are correct')
@@ -63,6 +73,7 @@ class LogReader(object):
                 raise TypeError('log_location should be a string')
         self.log_location = log_location
         self.known_ips = self._get_known_ips()
+        self.ubnt_blacklist = self.get_ubnt_blacklist()
 
     # Function to validate IPs or subnets
     def _is_valid_ip_or_subnet(self, entry):
@@ -107,7 +118,44 @@ class LogReader(object):
         """, (table_name,))
         return cursor.fetchone() is not None
 
-    def insert_into_blacklist(self):
+    def get_ubnt_blacklist(self):
+        # Disable SSL verification (use caution in production)
+        session = requests.Session()
+        session.verify = False  # Disable SSL verification (optional)
+
+        # Authenticate and get the session ID
+        login_response = session.post(UBNT_LOGIN_URL, json=UBNT_LOGIN_PAYLOAD)
+
+        if login_response.status_code == 200:
+            logger.debug(f'UBNT API login successful')
+            # Extract the session cookie after successful login
+            session_id = session.cookies.get('unifises')
+        else:
+            logger.error(f"UBNT API login failed. Status Code: {login_response.status_code}")
+            logger.debug(f'{login_response.json()}')
+            exit()
+
+        headers = {
+            "Content-Type": "application/json",
+            "Cookie": f"unifises={session_id}"  # Include the session ID cookie
+        }
+
+        firewall_group_response = session.get(UBNT_FW_GROUP_URL, headers=headers)
+        data = firewall_group_response.json()
+        logout_response = session.post(UBNT_LOGOUT_URL)
+        if logout_response.status_code == 200:
+            logger.info(f'UBNT API logout successful')
+
+        else:
+            logger.error(f"UBNT API logout failed. Status Code: {login_response.status_code}")
+            logger.debug(f'{login_response.json()}')
+
+        return data['data'][0]['group_members']
+
+    def insert_into_blacklist_from_file(self):
+        # Will read a text file in format address <ip_address>
+        # and insert each IP in blacklist table if IP does not exist.
+        # If table doesn't exist it will create it.
         conn = self.create_sqlite_connection()
         query =  """
         CREATE TABLE IF NOT EXISTS blacklist (
@@ -479,9 +527,9 @@ def main():
 
     # Read nginx error log and spit out csv
     readit.parse_log_file()
-    #readit.write_ban_list_csv()
-    #readit.write_parsed_results_csv()
-    readit.add_abuseipdb_for_ban_list()
+    # readit.write_ban_list_csv()
+    # readit.write_parsed_results_csv()
+    # readit.add_abuseipdb_for_ban_list()
 
     # readit.print_log_to_console()
     # readit.write_known_ips()
