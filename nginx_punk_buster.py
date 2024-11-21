@@ -6,7 +6,6 @@ import logging
 import re
 from io import StringIO
 
-
 import requests
 import sqlite3
 import sys
@@ -424,6 +423,9 @@ class LogReader(object):
     def add_abuseipdb_for_blacklist_ips(self):
         # Add info from AbuseIPDB to abuse_ip_db table in SQLite
         # for each IP address in blacklist table
+        ip_addresses = None
+        abuse_ips = None
+
         conn = self.create_sqlite_connection()
         cursor = conn.cursor()
 
@@ -636,6 +638,7 @@ class NginxErrorLogReader(LogReader):
     def add_abuseipdb_for_ban_list(self):
         # Add info from AbuseIPDB to abuse_ip_db table in SQLite
         # for each IP address in the ban list
+        abuse_ips = None
         conn = self.create_sqlite_connection()
         cursor = conn.cursor()
 
