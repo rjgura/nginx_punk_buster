@@ -323,6 +323,7 @@ class LogReader(object):
         now = datetime.now()
         cursor = conn.cursor()
         data_to_insert = [(entry, now) for entry in valid_entries]
+
         cursor.executemany(
             "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
             data_to_insert
@@ -331,7 +332,6 @@ class LogReader(object):
         conn.commit()
         conn.close()
         logger.info(f'Insert into blacklist table in SQLite completed successfully')
-
 
 
     def insert_into_blacklist_from_file(self):
@@ -356,9 +356,11 @@ class LogReader(object):
 
             valid_entries = [entry for entry in entries if self._is_valid_ip_or_subnet(entry)]
 
-            now = datetime.now()
             cursor = conn.cursor()
+
+            now = datetime.now()
             data_to_insert = [(entry, now) for entry in valid_entries]
+
             cursor.executemany(
                 "INSERT OR IGNORE INTO blacklist (ip_address, date_added) VALUES (?, ?)",
                 data_to_insert
@@ -407,17 +409,6 @@ class LogReader(object):
                              country_code, country_name,
                              usage_type, isp, domain,
                              is_public, is_whitelisted, is_tor, last_reported_at, date_added))
-
-
-
-    @staticmethod
-    def get_all_data_as_dict(conn):
-        """Fetch all data and return as a list of dictionaries."""
-        conn.row_factory = sqlite3.Row  # Enables dictionary-like access
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM abuse_ip_db")
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
 
 
     def add_abuseipdb_for_blacklist_ips(self):
@@ -494,14 +485,26 @@ class LogReader(object):
             "maxAgeInDays": 90,
             "verbose": True
         }
+
         response = requests.get(url, headers=headers, params=params)
+
         if response.status_code == 200:
             logger.debug(f'AbuseIPDB API Response Code: {response.status_code}')
             data = response.json()['data']
             return data
+
         else:
             return {"error": f"Request failed with status code {response.status_code}", "details": response.text}
 
+
+    @staticmethod
+    def get_all_data_as_dict(conn):
+        """Fetch all data and return as a list of dictionaries."""
+        conn.row_factory = sqlite3.Row  # Enables dictionary-like access
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM abuse_ip_db")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
 
 
