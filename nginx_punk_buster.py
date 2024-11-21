@@ -4,6 +4,9 @@ import ipaddress
 import json
 import logging
 import re
+from io import StringIO
+
+
 import requests
 import sqlite3
 import sys
@@ -11,24 +14,30 @@ import urllib3
 
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, \
+    Combine, Regex, Optional, Literal, removeQuotes, SkipTo, ParseResults
 
-from pyparsing import Word, nums, alphanums, Suppress, quotedString, Group, Combine, Regex, Optional, Literal, \
-    removeQuotes, SkipTo, ParseResults
-
+#
+# Constants
+#
+# Local Script Config Settings:
 CONFIG_PATH = r'LocalConfig/Settings.ini'
-NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 KNOWN_IPS_LIST = r'LocalConfig/known_ips.json'
-CSV_PATH = r'LocalConfig/'
 SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
+CSV_PATH = r'LocalConfig/'
+
+# Locations of logs for parsing:
+NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
 
-# Disable SSL verification warning globally
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+# Ubiquiti Network Controller API Endpoints
 UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
 UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
 UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/65337212ce5caf38ad0796f6'
 
+#
+# Logging
+#
 LOG_FILENAME = r'LocalConfig/NginxPunkBuster.log'
 '''
 LOG_FILENAME = '/var/log/NginxPunkBuster.log' for Linux
@@ -80,20 +89,29 @@ except KeyError:
     logger.error('Error loading config file: check that file exists and settings inside are correct')
     quit()
 
+#
+# Global Settings
+#
+
+# Disable SSL verification warning globally to remove
+# warnings about the Ubiquiti untrusted certificate
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# This stuff handles a deprecation warning for SQLite handling of datetime
 # Register adapters and converters for datetime
 def adapt_datetime(dt):
     """Convert datetime to string for storage."""
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
-
 def convert_datetime(value):
     """Convert string back to datetime object."""
     return datetime.strptime(value.decode("utf-8"), "%Y-%m-%d %H:%M:%S")
 
-
 # Register the adapter and converter
 sqlite3.register_adapter(datetime, adapt_datetime)
 sqlite3.register_converter("DATETIME", convert_datetime)
+
+
 
 
 class LogReader(object):
@@ -104,8 +122,9 @@ class LogReader(object):
         self.known_ips = self._get_known_ips()
         self.ubnt_blacklist = self.get_ubnt_blacklist()
 
-    # Function to validate IPs or subnets
-    def _is_valid_ip_or_subnet(self, entry):
+    # Validate format of IPs or subnets
+    @staticmethod
+    def _is_valid_ip_or_subnet(entry):
         try:
             # Check if it is an IP or subnet
             ipaddress.ip_network(entry, strict=False)  # Handles both cases
@@ -113,22 +132,24 @@ class LogReader(object):
         except ValueError:
             return False
 
-    def _get_known_ips(self):
+    @staticmethod
+    def _get_known_ips():
         with open(KNOWN_IPS_LIST, 'r') as file:
             data = json.load(file)
             return data
 
     def _write_known_ips(self):
+        file: StringIO
         data = self.known_ips
         with open(KNOWN_IPS_LIST, 'w') as file:
             json.dump(data, file, indent=4)
 
-    def _write_csv(self, list_of_dicts, file_path):
+    @staticmethod
+    def _write_csv(list_of_dicts, file_path):
+        file: StringIO
         with open(file_path, mode='w', newline='') as file:
             # Define the fieldnames (this will be the header row in the CSV)
             fieldnames = list_of_dicts[0].keys()
-
-            # Create a DictWriter object
             writer = csv.DictWriter(file, fieldnames=fieldnames)
 
             # Write the header row
@@ -137,11 +158,13 @@ class LogReader(object):
             # Write data rows
             writer.writerows(list_of_dicts)
 
-    def create_sqlite_connection(self, db_name=SQLite_DB):
+    @staticmethod
+    def create_sqlite_connection(db_name=SQLite_DB):
         conn = sqlite3.connect(db_name)
         return conn
 
-    def _table_exists(self, cursor, table_name):
+    @staticmethod
+    def _table_exists(cursor, table_name):
         cursor.execute("""
             SELECT name FROM sqlite_master WHERE type='table' AND name=?;
         """, (table_name,))
@@ -669,47 +692,52 @@ class LogReaderFactory:
 
 
 def main():
+
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
+
+    # Read nginx error log and spit out csv
+    readit.parse_log_file()
+    readit.write_ban_list_csv()
+    readit.write_parsed_results_csv()
+
+    # readit.set_ubnt_blacklist(readit.ban_list_ips)
+    # readit.insert_into_blacklist(readit.ban_list_ips)
 
     # Add data from AbuseIPDB API to abuse_ip_db using Blacklisted IPs
     # readit.add_abuseipdb_for_blacklist_ips()
 
-    # Update list of Blacklisted IPs
-    # readit.load_current_blacklist()
-
-    new_list = [
-        '192.189.2.218',
-        '20.118.68.251',
-        '104.209.34.203',
-        '70.39.75.135',
-        '4.151.229.99',
-        '104.40.75.76',
-        '66.94.114.121',
-        '81.161.238.40',
-        '47.251.103.74',
-        '4.246.246.232',
-        '193.177.182.8',
-        '20.225.3.119',
-        '138.197.27.249',
-        '66.240.236.116',
-        '4.151.230.245',
-        '70.39.75.151'
-    ]
 
 
-    # Read nginx error log and spit out csv
-    #readit.parse_log_file()
-    #readit.set_ubnt_blacklist(new_list)
 
-    #readit.write_ban_list_csv()
-    #readit.write_parsed_results_csv()
-    #readit.set_ubnt_blacklist(readit.ban_list_ips)
-    #readit.insert_into_blacklist(readit.ban_list_ips)
-    #readit.add_abuseipdb_for_ban_list()
 
-    # readit.insert_into_blacklist(new_list)
+    # readit.add_abuseipdb_for_ban_list()
 
     # readit.print_log_to_console()
+
+    # Update blacklist from this variable
+    # new_list = [
+    #     '192.189.2.218',
+    #     '20.118.68.251',
+    #     '104.209.34.203',
+    #     '70.39.75.135',
+    #     '4.151.229.99',
+    #     '104.40.75.76',
+    #     '66.94.114.121',
+    #     '81.161.238.40',
+    #     '47.251.103.74',
+    #     '4.246.246.232',
+    #     '193.177.182.8',
+    #     '20.225.3.119',
+    #     '138.197.27.249',
+    #     '66.240.236.116',
+    #     '4.151.230.245',
+    #     '70.39.75.151'
+    # ]
+    # readit.insert_into_blacklist(new_list)
+
+    # Update list of Blacklisted IPs from a text file
+    # readit.load_current_blacklist()
+
     # readit.write_known_ips()
 
 
