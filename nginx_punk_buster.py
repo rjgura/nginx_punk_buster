@@ -26,7 +26,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 UBNT_LOGIN_URL = 'https://192.168.1.4:8443/api/login'
 UBNT_LOGOUT_URL = 'https://192.168.1.4:8443/api/logout'
-UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/673e8652f46fb86a9ec297fd'
+UBNT_FW_GROUP_URL = 'https://192.168.1.4:8443/api/s/566dua2v/rest/firewallgroup/673ed5dbf46fb86a9ec2c34a'
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 FORMATTER = logging.Formatter('[%(asctime)s][%(levelname)s]: %(message)s', DATE_FORMAT)
@@ -527,12 +527,16 @@ class NginxErrorLogReader(LogReader):
 
     def _create_ban_list(self):
         self.ban_list = []
+        self.ban_list_ips = []
         for result in self.parsed_results:
             ip = result['ClientIP']
             if ip not in [entry['ClientIP'] for entry in self.ban_list]:
                 ip_count = sum(1 for entry in self.parsed_results if entry.get('ClientIP') == ip)
                 result['Count'] = ip_count
                 self.ban_list.append(result)
+
+        for entry in self.ban_list:
+            self.ban_list_ips.append(entry['ClientIP'])
 
     def add_abuseipdb_for_ban_list(self):
         # Add info from AbuseIPDB to abuse_ip_db table in SQLite
@@ -620,21 +624,21 @@ def main():
     # Update list of Blacklisted IPs
     # readit.load_current_blacklist()
 
-    # Read nginx error log and spit out csv
-    readit.parse_log_file()
-
     new_list = [
-        "45.129.14.71",
-        "118.179.203.50",
-        "156.220.208.167",
-        "135.125.216.246",
-        "198.235.24.202",
-        "81.161.238.40"
+        "138.197.27.249",
+        "66.240.236.116",
+        "4.151.230.245",
+        "70.39.75.151"
     ]
 
-    readit.set_ubnt_blacklist(new_list)
-    # readit.write_ban_list_csv()
-    # readit.write_parsed_results_csv()
+
+    # Read nginx error log and spit out csv
+    readit.parse_log_file()
+    #readit.set_ubnt_blacklist(new_list)
+
+    readit.write_ban_list_csv()
+    #readit.write_parsed_results_csv()
+    #readit.set_ubnt_blacklist(readit.ban_list)
     # readit.add_abuseipdb_for_ban_list()
 
     # readit.print_log_to_console()
