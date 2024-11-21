@@ -633,6 +633,7 @@ class NginxErrorLogReader(LogReader):
         for entry in self.ban_list:
             self.ban_list_ips.append(entry['ClientIP'])
 
+
     def add_abuseipdb_for_ban_list(self):
         # Add info from AbuseIPDB to abuse_ip_db table in SQLite
         # for each IP address in the ban list
@@ -682,18 +683,19 @@ class NginxErrorLogReader(LogReader):
         conn.commit()
         conn.close()
 
+
     def write_ban_list_csv(self):
         file_name = r'ban_list.csv'
         csv_path = CSV_PATH + file_name
         logger.debug(f'write_ban_list_csv writing: {csv_path}')
         self._write_csv(self.ban_list, csv_path)
 
+
     def write_parsed_results_csv(self):
         file_name = r'parsed_results.csv'
         csv_path = CSV_PATH + file_name
         logger.debug(f'write_parsed_results_csv writing: {csv_path}')
         self._write_csv(self.parsed_results, csv_path)
-
 
 
 
@@ -712,23 +714,32 @@ class LogReaderFactory:
 
 
 
+
 def main():
 
     readit = NginxErrorLogReader(NGINX_ERROR_LOG)
 
+    #
+    # Parse nginx error log for ModSecurity entries
+    # Use entries to create a ban list
+    # Write results to csv
+    #
     # Read nginx error log and spit out csv
     readit.parse_log_file()
     readit.write_ban_list_csv()
     readit.write_parsed_results_csv()
 
+    #
+    # Use the ban list to update firewall group for blacklist
+    # on Ubiquiti Network Controller
+    #
     # readit.set_ubnt_blacklist(readit.ban_list_ips)
     # readit.insert_into_blacklist(readit.ban_list_ips)
 
-    # Add data from AbuseIPDB API to abuse_ip_db using Blacklisted IPs
+    #
+    # Insert data from AbuseIPDB API into abuse_ip_db using Blacklisted IPs
+    #
     # readit.add_abuseipdb_for_blacklist_ips()
-
-
-
 
 
     # readit.add_abuseipdb_for_ban_list()
