@@ -504,6 +504,7 @@ class LogReader(object):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM abuse_ip_db")
         rows = cursor.fetchall()
+        conn.row_factory = None
         return [dict(row) for row in rows]
 
 
