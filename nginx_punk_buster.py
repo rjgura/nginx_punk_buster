@@ -26,7 +26,7 @@ SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
 CSV_PATH = r'LocalConfig/'
 
 # Locations of logs for parsing:
-NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
+NGINX_ERROR_LOG = r'LocalConfig/error.log.2'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
 
 # Ubiquiti Network Controller API Endpoints
@@ -145,17 +145,21 @@ class LogReader(object):
 
     @staticmethod
     def _write_csv(list_of_dicts, file_path):
-        file: StringIO
-        with open(file_path, mode='w', newline='') as file:
-            # Define the fieldnames (this will be the header row in the CSV)
-            fieldnames = list_of_dicts[0].keys()
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
+        try:
+            file: StringIO
+            with open(file_path, mode='w', newline='') as file:
+                # Define the fieldnames (this will be the header row in the CSV)
+                fieldnames = list_of_dicts[0].keys()
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
 
-            # Write the header row
-            writer.writeheader()
+                # Write the header row
+                writer.writeheader()
 
-            # Write data rows
-            writer.writerows(list_of_dicts)
+                # Write data rows
+                writer.writerows(list_of_dicts)
+
+        except PermissionError as e:
+            logger.error(f'Permission error, file may be open: {e}')
 
     @staticmethod
     def create_sqlite_connection(db_name=SQLite_DB):
@@ -775,8 +779,8 @@ def main():
     # Use the ban list to update firewall group for blacklist
     # on Ubiquiti Network Controller
     #
-    # readit.set_ubnt_blacklist(readit.ban_list_ips)
-    # readit.insert_into_blacklist(readit.ban_list_ips)
+    readit.set_ubnt_blacklist(readit.ban_list_ips)
+    readit.insert_into_blacklist(readit.ban_list_ips)
 
     #
     # Insert data from AbuseIPDB API into abuse_ip_db using Blacklisted IPs
