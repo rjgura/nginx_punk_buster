@@ -26,7 +26,7 @@ SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
 CSV_PATH = r'LocalConfig/'
 
 # Locations of logs for parsing:
-NGINX_ERROR_LOG = r'LocalConfig/error.log.2'
+NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
 
 # Ubiquiti Network Controller API Endpoints
@@ -289,6 +289,7 @@ class LogReader(object):
             # Check the response
             if update_response.status_code == 200:
                 logger.info(f'Updated the UBNT Blacklist successfully')
+                logger.info(f'{len(list_to_add)} new IPs added to UBNT Blacklist')
                 print(update_response.json())
             else:
                 print(f'Failed to update group. Status Code: {update_response.status_code}')
@@ -590,6 +591,7 @@ class NginxErrorLogReader(LogReader):
 
     # Function to parse each line of the log file
     def parse_log_file(self):
+        num_lines = 0
         with open(self.log_location, 'r') as file:
             for line in file:
                 try:
@@ -608,12 +610,14 @@ class NginxErrorLogReader(LogReader):
                         self.parsed_results.append(parsed_dict)
                         logger.debug(f'Parsed line: {parsed}')
                         # TODO: Send known IP lines to their own dictionary
+                    num_lines += 1
 
                 except Exception as e:
                     logger.error(f'Failed to parse line: {line}')
                     # TODO: Save lines that were not parsed for later analysis
                     logger.error(f'Error: {e}')
 
+        logger.info(f'Finished parsing nginx error log. Number of rows parsed: {num_lines}')
         self._create_ban_list()
 
 
