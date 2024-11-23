@@ -638,7 +638,7 @@ class NginxErrorLogReader(LogReader):
     def add_abuseipdb_for_ban_list(self):
         # Add info from AbuseIPDB to abuse_ip_db table in SQLite
         # for each IP address in the ban list
-        abuse_ips = None
+        abuse_ip_data = None
         conn = self.create_sqlite_connection()
         cursor = conn.cursor()
 
@@ -646,38 +646,38 @@ class NginxErrorLogReader(LogReader):
             if self._table_exists(cursor, 'abuse_ip_db'):
                 cursor.execute('SELECT ip_address FROM abuse_ip_db')
                 # Get list of IPs from abuse_ip_db, because I don't want to call API if already in there
-                abuse_ips = [row[0] for row in cursor.fetchall()]
-                cursor.execute('SELECT * FROM abuse_ip_db')
-                rows = cursor.fetchall()
-                abuse_ip_data = [dict(row) for row in rows]
+                abuse_ip_data = self.get_all_data_as_dict(conn)
+                index = {data['ip_address']: data for data in abuse_ip_data}
+                abuse_ip_data = index
 
             else:
                 logger.info(f'abuse_ip_db has not been created in SQLite yet, skipping for now')
-                abuse_ips = []
+                abuse_ip_data = []
 
         except sqlite3.OperationalError as e:
             logger.error(f'Error while updating AbuseIPDB: {e}')
 
         logger.debug(f'Beginning Loop Through Ban List IP Addresses')
         for entry in self.ban_list:
-            if entry['ClientIP'] in abuse_ips:
+            if entry['ClientIP'] in abuse_ip_data:
                 logger.debug(f'Found in abuse_ip_db table in SQLite: {entry['ClientIP']}')
+                result = abuse_ip_data.get(entry['ClientIP'])
 
-                abuse_confidence_score = data.get('abuseConfidenceScore', 0)
-                reported_count = data.get('totalReports', 0)
-                distinct_reporter_count = data.get('numDistinctUsers', 0)
-                country_code = data.get('countryCode', '??')
-                country_name = data.get('countryName', 'Unknown')
-                usage_type = data.get('usageType')
-                isp = data.get('isp')
-                domain = data.get('domain')
-                is_public = data.get('isPublic')
-                is_whitelisted = data.get('isWhitelisted')
-                is_tor = data.get('isTor')
-                last_reported_at = data.get('lastReportedAt')
+                abuse_confidence_score = result.get('abuse_confidence_score', 0)
+                reported_count = result.get('reported_count', 0)
+                distinct_reporter_count = result.get('distinct_reporter_count', 0)
+                country_code = result.get('country_code', '??')
+                country_name = result.get('country_name', 'Unknown')
+                usage_type = result.get('usage_type')
+                isp = result.get('isp')
+                domain = result.get('domain')
+                is_public = result.get('is_public')
+                is_whitelisted = result.get('is_whitelisted')
+                is_tor = result.get('is_tor')
+                last_reported_at = result.get('last_reported_at')
                 date_added = datetime.now()
 
-            if entry['ClientIP'] not in abuse_ips:
+            else:
                 logger.debug(f'Calling AbuseIPDB API for: {entry['ClientIP']}')
                 data = self.abuse_ipdb_check_ip(entry['ClientIP'])
                 logger.debug(f'Received AbuseIPDB Data: {data}')
@@ -696,30 +696,30 @@ class NginxErrorLogReader(LogReader):
                 last_reported_at = data.get('lastReportedAt')
                 date_added = datetime.now()
 
-                entry.update(
-                    {
-                        'abuse_confidence_score': abuse_confidence_score,
-                        'reported_count': reported_count,
-                        'distinct_reporter_count': distinct_reporter_count,
-                        'country_code': country_code,
-                        'country_name': country_name,
-                        'usage_type': usage_type,
-                        'isp': isp,
-                        'domain': domain,
-                        'is_public': is_public,
-                        'is_whitelisted': is_whitelisted,
-                        'is_tor': is_tor,
-                        'last_reported_at': last_reported_at,
-                        'date_added': date_added
-                    }
-                )
-
                 logger.debug(f'Inserting AbuseIPDB Data into abuse_ip_db table in SQLite')
                 self.insert_into_abuse_ip_db(cursor, entry['ClientIP'], abuse_confidence_score,
                                              reported_count, distinct_reporter_count,
                                              country_code, country_name, usage_type, isp,
                                              domain, is_public, is_whitelisted, is_tor,
                                              last_reported_at, date_added)
+
+            entry.update(
+                {
+                    'abuse_confidence_score': abuse_confidence_score,
+                    'reported_count': reported_count,
+                    'distinct_reporter_count': distinct_reporter_count,
+                    'country_code': country_code,
+                    'country_name': country_name,
+                    'usage_type': usage_type,
+                    'isp': isp,
+                    'domain': domain,
+                    'is_public': is_public,
+                    'is_whitelisted': is_whitelisted,
+                    'is_tor': is_tor,
+                    'last_reported_at': last_reported_at,
+                    'date_added': date_added
+                }
+            )
 
         conn.commit()
         conn.close()
@@ -767,7 +767,6 @@ def main():
     #
     # Read nginx error log and spit out csv
     readit.parse_log_file()
-    readit.get_all_data_as_dict()
     readit.add_abuseipdb_for_ban_list()
     readit.write_ban_list_csv()
     # readit.write_parsed_results_csv()
