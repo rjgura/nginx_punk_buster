@@ -26,7 +26,7 @@ SQLite_DB = r'LocalConfig/nginx_punk_buster.db'
 CSV_PATH = r'LocalConfig/'
 
 # Locations of logs for parsing:
-NGINX_ERROR_LOG = r'LocalConfig/error.log.1'
+NGINX_ERROR_LOG = r'LocalConfig/error.log.2'
 BLACKLIST_LOCATION = r'LocalConfig/BlackListAssholes.txt'
 
 # Ubiquiti Network Controller API Endpoints
@@ -144,7 +144,7 @@ class LogReader(object):
             json.dump(data, file, indent=4)
 
     @staticmethod
-    def _write_csv(list_of_dicts, file_path):
+    def _write_csv_list_of_dicts(list_of_dicts, file_path):
         try:
             file: StringIO
             with open(file_path, mode='w', newline='') as file:
@@ -160,6 +160,20 @@ class LogReader(object):
 
         except PermissionError as e:
             logger.error(f'Permission error, file may be open: {e}')
+
+
+    @staticmethod
+    def _write_list_of_strs(list_of_strs, file_path):
+        try:
+            file: StringIO
+            with open(file_path, mode='w') as file:
+
+                for string in list_of_strs:
+                    file.write(string + '\n')
+
+        except PermissionError as e:
+            logger.error(f'Permission error, file may be open: {e}')
+
 
     @staticmethod
     def create_sqlite_connection(db_name=SQLite_DB):
@@ -375,6 +389,12 @@ class LogReader(object):
             conn.close()
             logger.info(f'Loading current blacklist to SQLite completed successfully')
 
+
+    def sync_blacklist_table_from_ubnt(self):
+        self.ubnt_blacklist = self.get_ubnt_blacklist()
+        self.insert_into_blacklist(self.ubnt_blacklist)
+
+
     @staticmethod
     def insert_into_abuse_ip_db(cursor, ip_address, abuse_confidence_score,
                                 reported_count, distinct_reporter_count,
@@ -520,6 +540,7 @@ class NginxErrorLogReader(LogReader):
         super().__init__(log_location)
         # Define basic components of a log entry
         self.parsed_results = []
+        self.not_parsed_results = []
         self.integer = Word(nums)
         self.ip_address = Combine(Word(nums) + ('.' + Word(nums)) * 3)
         self.datetime_part = Combine(Word(nums, exact=4) + '/' +
@@ -615,6 +636,7 @@ class NginxErrorLogReader(LogReader):
                 except Exception as e:
                     logger.error(f'Failed to parse line: {line}')
                     # TODO: Save lines that were not parsed for later analysis
+                    self.not_parsed_results.append(line)
                     logger.error(f'Error: {e}')
 
         logger.info(f'Finished parsing nginx error log. Number of rows parsed: {num_lines}')
@@ -737,14 +759,21 @@ class NginxErrorLogReader(LogReader):
         file_name = r'ban_list.csv'
         csv_path = CSV_PATH + file_name
         logger.debug(f'write_ban_list_csv writing: {csv_path}')
-        self._write_csv(self.ban_list, csv_path)
+        self._write_csv_list_of_dicts(self.ban_list, csv_path)
 
 
     def write_parsed_results_csv(self):
         file_name = r'parsed_results.csv'
         csv_path = CSV_PATH + file_name
         logger.debug(f'write_parsed_results_csv writing: {csv_path}')
-        self._write_csv(self.parsed_results, csv_path)
+        self._write_csv_list_of_dicts(self.parsed_results, csv_path)
+
+
+    def write_not_parsed_results(self):
+        file_name = r'not_parsed_results.txt'
+        txt_path = CSV_PATH + file_name
+        logger.debug(f'write_not_parsed_results writing: {txt_path}')
+        self._write_list_of_strs(self.not_parsed_results, txt_path)
 
 
 
@@ -777,7 +806,9 @@ def main():
     readit.parse_log_file()
     readit.add_abuseipdb_for_ban_list()
     readit.write_ban_list_csv()
+    readit.write_not_parsed_results()
     # readit.write_parsed_results_csv()
+    readit.sync_blacklist_table_from_ubnt()
 
     #
     # Use the ban list to update firewall group for blacklist
@@ -789,7 +820,7 @@ def main():
     #
     # Insert data from AbuseIPDB API into abuse_ip_db using Blacklisted IPs
     #
-    # readit.add_abuseipdb_for_blacklist_ips()
+    readit.add_abuseipdb_for_blacklist_ips()
 
 
     # readit.add_abuseipdb_for_ban_list()
