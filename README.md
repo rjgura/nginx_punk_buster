@@ -19,3 +19,8 @@ We're ready to relieve you.
 
 # Installation
 
+1. Copy files to location
+2. Edit nginx_punk_buster.py to configure locations of files
+3. Update known_ips.json with any known addresses you want to skip
+4. Update credentials in Settings.ini
+5. Automate with Cron or Windows Scheduled Task
